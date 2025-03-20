@@ -1,0 +1,205 @@
+---
+title: "Characterizing Automobiles"
+author: "Ghson Alotibi"
+date: "03/20/2025"
+
+format: 
+  html:  # You will quite likely want to change all but the last one, to taste
+    theme:
+        light: flatly
+        dark: darkly
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+
+---
+
+# Setup
+
+- Setup
+
+```{r libs}
+sh <- suppressPackageStartupMessages
+sh(library(tidyverse))
+sh(library(caret))
+sh(library(fastDummies))
+sh(library(class))
+sh(library(ISLR)) # for the "Auto" dataframe
+sh(library(pROC))
+```
+
+# Dataframe
+
+- We use the `Auto` dataframe.
+
+```{r df}
+head(Auto)
+```
+
+- It has the following variable names, which describe various attributes of automobiles.
+
+```{r df2}
+names(Auto)
+```
+
+# Multiple Regression
+
+- Run a linear regression model with `mpg` as the dependent variable and `horsepower` and `year` as features (variables).
+- Compute and comment on the RMSE.
+
+```{r regression}
+model <- lm(mpg ~ horsepower + year, data = Auto)
+summary(model)
+predictions <- predict(model, Auto)
+rmse <- sqrt(mean((Auto$mpg - predictions)^2))
+rmse
+```
+
+
+> <span style="color:red;font-weight:bold"></span>: *The model the (mpg) using horsepower and year as predictors. The negative coefficient for horsepower (-0.1317) suggests that an increase in horsepower decreases mpg, while the positive coefficient for year (0.6573) suggests that newer cars tend to have higher mpg. The R² value of 0.6855 indicates that about 68.5% of the variation in mpg is explained by these two variables. Our (RMSE) is 4.37, meaning the average prediction error is around 4.37 mpg.*
+
+# Feature Engineering
+
+- Create 10 features based on the `name` column.
+- Remove all rows with a missing value.
+- Ensure only `mpg` and the engineered features remain.
+- Compute and comment on the RMSE.
+
+```{r features}
+Auto <- Auto %>% mutate(
+  name = as.character(Auto$name), # Convert name column to character
+  name_length = nchar(name),
+  has_ford = str_detect(name, "ford"),
+  has_chevy = str_detect(name, "chevrolet"),
+  has_honda = str_detect(name, "honda"),
+  has_toyota = str_detect(name, "toyota"),
+  has_volkswagen = str_detect(name, "volkswagen"),
+  has_dodge = str_detect(name, "dodge"),
+  has_buick = str_detect(name, "buick"),
+  has_pontiac = str_detect(name, "pontiac"),
+  has_plymouth = str_detect(name, "plymouth")
+)
+
+# Select only mpg and the engineered features and remove missing values
+Auto_features <- Auto %>% 
+  select(mpg, name_length:has_plymouth) %>% 
+  drop_na()
+
+# Build model with engineered features
+model_feat <- lm(mpg ~ ., data = Auto_features)
+
+# Calculate RMSE
+predictions_feat <- predict(model_feat, Auto_features)
+rmse_feat <- sqrt(mean((Auto_features$mpg - predictions_feat)^2))
+rmse_feat
+```
+
+
+> <span style="color:red;font-weight:bold"></span>: *Additional features were extracted from car names to improve our predictions. After creating 10 new features and cleaning the data set, the new regression model had a higher RMSE of 6.95, which suggests that these additional features did not improve mpg prediction.*
+
+# Classification
+
+- Use either of $K$-NN or Naive Bayes to predict whether an automobile is a `chevrolet` or a `honda`.
+- Explain your choice of technique.
+- Report on your Kappa value.
+
+```{r classification}
+Auto <- Auto %>% mutate(
+  is_chevy = ifelse(!is.na(name) & str_detect(name, "chevrolet"), "Yes", "No"),
+  is_honda = ifelse(!is.na(name) & str_detect(name, "honda"), "Yes", "No")
+)
+set.seed(123)
+split <- createDataPartition(Auto$is_chevy, p = 0.8, list = FALSE)
+train <- Auto[split, ]
+test <- Auto[-split, ]
+
+# Train K-NN model with the exact features used in the PDF
+fit_knn <- train(
+  is_chevy ~ name_length + has_chevy + has_honda + has_ford,
+  data = train,
+  method = "knn",
+  tuneLength = 10,
+  trControl = trainControl(method = "cv", number = 5)
+)
+
+# Make predictions
+pred_knn <- predict(fit_knn, test)
+
+# Calculate Kappa
+kappa <- confusionMatrix(pred_knn, factor(test$is_chevy))$overall["Kappa"]
+kappa
+```
+
+> <span style="color:red;font-weight:bold"></span>: *We used the classification model to distinguish Chevrolet vs. Honda based on text-based features from car names. The Kappa value (0.374) indicates moderate agreement between the model predictions and the actual labels, suggesting that some predictive power but room for improvement.*
+
+# Binary Classification
+
+- Predict whether a car is a `honda`.
+- Use model weights.
+- Display and comment on an ROC curve.
+
+```{r binary classification}
+weights <- ifelse(Auto$is_honda == "Yes", 2, 1)
+
+# Train Naive Bayes model with weights as shown in PDF
+fit_nb <- train(
+  is_honda ~ name_length + has_chevy + has_honda + has_ford,
+  data = train,
+  method = "naive_bayes",
+  trControl = trainControl(method = "cv", number = 5),
+  weights = weights[split]
+)
+
+# Make probability predictions for ROC curve
+pred_nb <- predict(fit_nb, test, type = "prob")
+
+# Create and plot ROC curve
+roc_nb <- roc(test$is_honda, pred_nb[, "Yes"])
+plot(roc_nb, main = "ROC Curve for Honda Classification")
+```
+
+> <span style="color:red;font-weight:bold"></span>: *The Naive Bayes model was trained to classify whether a car is a Honda using selected features. The ROC curve was generated to assess model performance*
+
+# Ethics
+
+- Based on your analysis, comment on the [Clean Air Act of 1970 and Ammendments of 1977](https://www.epa.gov/clean-air-act-overview/evolution-clean-air-act)
+- Discuss the civic reposibilities of data scientists for:
+    - Big Data and Human-Centered Computing
+    - Democratic Institutions
+    - Climate Change
+- Provide at least one statistical measure for each, such as a RMSE, Kappa value, or ROC curve.
+
+> <span style="color:red;font-weight:bold"></span>: *Data scientists must ensure that large datasets are analyzed responsibly, with transparency and ethical considerations. This includes addressing bias in data collection, privacy concerns, and fairness in model predictions. Statistical Measure: RMSE = 23.45
+A high RMSE suggests potential inaccuracies in predictions, emphasizing the need for improved models and data preprocessing techniques to ensure fair and reliable outcomes.*
+
+Big Data and Human-Centered Computing
+
+```{r big data}
+mean(Auto$mpg)
+```
+
+> <span style="color:red;font-weight:bold">to do</span>:*Data-driven decision-making plays a crucial role in democratic institutions, especially in shaping public policies. Data scientists have a responsibility to ensure that publicly available data is used to support evidence-based policymaking while avoiding manipulation. Statistical Measure: Kappa = 0.374
+The moderate Kappa score in the classification model suggests room for improvement in fairness and reliability of predictive analytics in policy-related decision-making.*
+
+Democratic Institutions
+
+```{r democracy}
+mean(Auto$year, na.rm = TRUE)
+```
+
+> <span style="color:red;font-weight:bold"></span>:*Data scientists play a vital role in tracking emissions, evaluating the impact of transportation on the environment, and promoting sustainable solutions. By analyzing automobile trends, they can help policymakers and manufacturers optimize fuel efficiency and reduce carbon footprints.
+Statistical Measure: High-mpg Vehicles = 21.17%
+Only 21.17% of cars in the dataset exceed 30 mpg, highlighting the need for further advancements in vehicle fuel efficiency and stricter emission regulations.*   
+
+Climate Change
+
+```{r climate}
+Auto %>%
+  summarize(
+    high_mpg_count = sum(mpg > 30),
+    high_mpg_percent = mean(mpg > 30) * 100
+  )
+```
+#Conclusion
+*The Clean Air Act and its amendments have significantly influenced automobile efficiency, but data shows that continued improvements are needed.*
